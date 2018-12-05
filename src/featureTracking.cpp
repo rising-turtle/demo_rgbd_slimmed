@@ -19,7 +19,7 @@ IplImage *imageCur = cvCreateImage(imgSize, IPL_DEPTH_8U, 1);
 IplImage *imageLast = cvCreateImage(imgSize, IPL_DEPTH_8U, 1);
 
 int showCount = 0;
-const int showSkipNum = 2;
+const int showSkipNum = 1;
 const int showDSRate = 2;
 CvSize showSize = cvSize(imageWidth / showDSRate, imageHeight / showDSRate);
 
@@ -74,7 +74,8 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
   for (int i = 0; i < imagePixelNum; i++) {
     imageCur->imageData[i] = (char)imageData->data[i];
   }
-
+  
+  cout<<"handle image at "<<std::fixed<<imageData->header.stamp.toSec()<<endl;
   //cvEqualizeHist(imageCur, imageCur);
 
   cvResize(imageLast, imageShow);
@@ -186,6 +187,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
       }
     }
   }
+
   totalFeatureNum = featureCount;
   meanShiftX /= totalFeatureNum;
   meanShiftY /= totalFeatureNum;
@@ -197,7 +199,8 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
 
   showCount = (showCount + 1) % (showSkipNum + 1);
   if (showCount == showSkipNum) {
-    Mat imageShowMat(imageShow);
+    cv::Mat imageShowMat = cv::cvarrToMat(imageShow);
+//    Mat imageShowMat(imageShow);
     bridge.image = imageShowMat;
     bridge.encoding = "mono8";
     sensor_msgs::Image::Ptr imageShowPointer = bridge.toImageMsg();

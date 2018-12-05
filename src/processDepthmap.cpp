@@ -9,9 +9,12 @@
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 
+#include <iostream>
+
 #include "cameraParameters.h"
 #include "pointDefinition.h"
 
+using namespace std; 
 const double PI = 3.1415926;
 
 const int imagePixelNum = imageHeight * imageWidth;
@@ -58,6 +61,8 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
     ry -= 2 * PI;
   }
 
+  cout<<std::fixed<<"DP: receive vo at "<<time<<" location: "<<voData->pose.pose.position.x<<" "<<voData->pose.pose.position.y<<" "<<voData->pose.pose.position.z<<endl;
+
   double tx = voData->pose.pose.position.x - txRec;
   double ty = voData->pose.pose.position.y - tyRec;
   double tz = voData->pose.pose.position.z - tzRec;
@@ -94,6 +99,7 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
     tempCloud->clear();
     double x1, y1, z1, x2, y2, z2;
     int depthCloudNum = depthCloud->points.size();
+    // cout <<std::fixed<<"DP: handle vo at "<<time<<" lastPC has "<<depthCloudNum<<" points!"<<endl;
     for (int i = 0; i < depthCloudNum; i++) {
       point = depthCloud->points[i];
 
@@ -116,6 +122,7 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
         tempCloud->push_back(point);
       }
     }
+    // cout <<"DP: after transform lastPC now tempCloud has "<<tempCloud->points.size()<<" points!"<<endl;
 
     while (syncCloudTime[cloudRegInd] <= time && cloudRegInd != (syncCloudInd + 1) % keepSyncCloudNum) {
       double scale = (time - syncCloudTime[cloudRegInd]) / (time - timeRec);
@@ -166,6 +173,9 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
       cloudRegInd = (cloudRegInd + 1) % keepSyncCloudNum;
     }
 
+    // cout<<"DP: after register tempCloud has "<<tempCloud->points.size() <<" points"<<endl;
+
+
     depthCloud->clear();
     pcl::VoxelGrid<pcl::PointXYZI> downSizeFilter;
     downSizeFilter.setInputCloud(tempCloud);
@@ -187,6 +197,8 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
       }
     }
 
+    // cout <<"DP: after downsample depth cloud has "<<depthCloudNum<<" points"<<endl;
+
     tempCloud2->clear();
     downSizeFilter.setInputCloud(tempCloud);
     downSizeFilter.setLeafSize(0.1, 0.1, 0.1);
@@ -199,6 +211,8 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
       tempCloud2->points[i].y *= tempCloud2->points[i].z / 10;
       tempCloud2->points[i].intensity = 10;
     }
+
+    // cout <<"DP: after downsample again depth cloud has "<<tempCloud2Num<<" points to publish "<<endl;
 
     sensor_msgs::PointCloud2 depthCloud2;
     pcl::toROSMsg(*tempCloud2, depthCloud2);
@@ -266,11 +280,12 @@ void syncCloudHandler(const sensor_msgs::Image::ConstPtr& syncCloud2)
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr syncCloudPointer = syncCloudArray[syncCloudInd];
   syncCloudPointer->clear();
-
+  // cout <<std::fixed<<"PD: receive " <<time<<" depth points: "<<tempCloud3->points.size()<<endl; 
   pcl::VoxelGrid<pcl::PointXYZI> downSizeFilter;
   downSizeFilter.setInputCloud(tempCloud3);
   downSizeFilter.setLeafSize(0.1, 0.1, 0.1);
   downSizeFilter.filter(*syncCloudPointer);
+  // cout <<"PD: after downsampling it has "<<syncCloudPointer->points.size()<<" points!"<<endl;
 }
 
 int main(int argc, char** argv)

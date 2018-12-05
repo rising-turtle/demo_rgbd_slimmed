@@ -5,6 +5,8 @@ set(CMAKE_BUILD_TYPE Release)
 set(BUILD_STATIC_LIBS ON)
 set(BUILD_SHARED_LIBS OFF)
 
+set(CMAKE_CXX_FLAGS "-std=c++11 -w -g -O3")
+
 ## Find catkin macros and libraries
 find_package(catkin REQUIRED COMPONENTS
   roscpp

@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ros/ros.h>
+#include <iostream>
+#include <fstream>
 
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Imu.h>
@@ -12,6 +14,8 @@
 
 #include "cameraParameters.h"
 #include "pointDefinition.h"
+
+using namespace std; 
 
 const double PI = 3.1415926;
 
@@ -76,6 +80,20 @@ ros::Publisher *imagePointsProjPubPointer = NULL;
 ros::Publisher *imageShowPubPointer;
 
 const int showDSRate = 2;
+
+void saveRelations(pcl::PointCloud<pcl::PointXYZHSV>::Ptr& pts,double time)
+{
+  stringstream ss; 
+  ss<<"./log/"<<std::fixed<<time<<"_demo.log"; 
+  // ofstream ouf("iprelations.log");
+  ofstream ouf(ss.str().c_str());
+  for(int i=0; i<pts->points.size(); i++)
+  {
+    pcl::PointXYZHSV& pt = pts->points[i]; 
+    ouf<<std::fixed<<pt.x<<" "<<pt.y<<" "<<pt.z<<" "<<pt.h<<" "<<pt.s<<" "<<pt.v<<endl;
+  }
+  return ; 
+}
 
 void accumulateRotation(double cx, double cy, double cz, double lx, double ly, double lz, 
                         double &ox, double &oy, double &oz)
@@ -170,6 +188,13 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
 
   imagePointsCur->clear();
   pcl::fromROSMsg(*imagePoints2, *imagePointsCur);
+  
+  for(int i=0 ;i<imagePointsCur->points.size(); i++)
+  {
+    if(imagePointsCur->points[i].ind == 0)
+      cout << "id 0 input: "<<imagePointsCur->points[i].u<<" "<<imagePointsCur->points[i].v<<endl;
+
+  }
 
   imagePointsLastNum = imagePointsCurNum;
   imagePointsCurNum = imagePointsCur->points.size();
@@ -191,6 +216,11 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
   pcl::PointXYZHSV ipr;
   ipRelations->clear();
   ipInd.clear();
+
+  int cnt_matched = 0; 
+  int cnt_with_dpt = 0; 
+  int cnt_with_dpt_tri = 0;
+  int cnt_no_depth = 0;
   for (int i = 0; i < imagePointsLastNum; i++) {
     bool ipFound = false;
     for (; j < imagePointsCurNum; j++) {
@@ -203,6 +233,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
     }
 
     if (ipFound) {
+      ++cnt_matched;
       ipr.x = imagePointsLast->points[i].u;
       ipr.y = imagePointsLast->points[i].v;
       ipr.z = imagePointsCur->points[j].u;
@@ -245,10 +276,13 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
                 - v*x1*z2 + v*x2*z1 - u*y1*z3 + u*y3*z1 + v*x1*z3 - v*x3*z1 + u*y2*z3 
                 - u*y3*z2 - v*x2*z3 + v*x3*z2);
           ipr.v = 1;
+          ++cnt_with_dpt;
+          // cout <<"ipr: u = "<<u<<" v = "<<v<<" s = "<<ipr.s<<" minDepth = "<<minDepth<<" maxDepth = "<<maxDepth<<endl;
 
           if (maxDepth - minDepth > 2) {
             ipr.s = 0;
             ipr.v = 0;
+            --cnt_with_dpt;
           } else if (ipr.s - maxDepth > 0.2) {
             ipr.s = maxDepth;
           } else if (ipr.s - minDepth < -0.2) {
@@ -343,6 +377,18 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
           if (depth > 0.5 && depth < 100) {
             ipr.s = depth;
             ipr.v = 2;
+            ++cnt_with_dpt_tri;
+            // cout<<" vo tri: at "<<std::fixed<<imagePointsLastTime<<" u0 = "<<u0<<" v0 "<<v0<<" u1 "<<u1<<" v1 "<<v1<<endl;
+            // cout<<" first pose: "<<startTransLast->points[i].h<<" "<<startTransLast->points[i].s<<" "<<startTransLast->points[i].v<<" ";
+            // cout<<" now pose: "<<transformSum[3]<<" "<<transformSum[4]<<" "<<transformSum[5]<<endl;
+            // cout<<" triangulate s: = "<<ipr.s<<endl;
+
+            // static ofstream ouf("tri_demo.log"); 
+            // if(startTransLast->points[i].h == 0. &&  startTransLast->points[i].s ==0. && startTransLast->points[i].v == 0.)
+            // {
+              // if(imagePointsCur->points[j].ind <=0 )
+              // ouf<<std::fixed<<imagePointsCurTime<<" "<<imagePointsCur->points[j].ind<<" "<<depth<<" "<<startPointsLast->points[i].u<<" "<<startPointsLast->points[i].v<<" "<<u1<<" "<<v1<<" "<<transformSum[3]<<" "<<transformSum[4]<<" "<<transformSum[5]<<" "<<transformSum[0]<<" "<<transformSum[1]<<" "<<transformSum[2]<<endl;
+            // }
           }
         }
 
@@ -357,10 +403,15 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
         }
       }
 
+      if(fabs(ipr.v) < 0.5)
+        ++cnt_no_depth;
       ipRelations->push_back(ipr);
       ipInd.push_back(imagePointsLast->points[i].ind);
     }
   }
+  
+  cout<<std::fixed<<"vo at "<< imagePointsCurTime<<" has found "<<cnt_matched<<" matches, with measured depth: "<<cnt_with_dpt<<" triangulated depth: "<<cnt_with_dpt_tri <<"no depth: "<<cnt_no_depth<<endl;
+  // saveRelations(ipRelations, imagePointsCurTime);
 
   int iterNum = 150;
   pcl::PointXYZHSV ipr2, ipr3, ipr4;
@@ -517,7 +568,17 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
       cv::transpose(matA, matAt);
       matAtA = matAt * matA;
       matAtB = matAt * matB;
+      // cout<<"matAtA: "<<endl<<matAtA<<endl;
+      // cout <<"matAtB: "<<endl<<matAtB<<endl;
       cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
+      if(matX.at<float>(0, 0) != matX.at<float>(0, 0))
+          break;
+
+       // cout <<"vo at iteration iterCount = "<<iterCount<<" "<<endl;
+       // for(int kk=0; kk<6; kk++)
+        {
+          //cout<<transform[kk]<<" + "<<matX.at<float>(kk, 0)<<" "<<endl;
+        }
 
       //if (fabs(matX.at<float>(0, 0)) < 0.1 && fabs(matX.at<float>(1, 0)) < 0.1 && 
       //    fabs(matX.at<float>(2, 0)) < 0.1) {
@@ -527,6 +588,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
         transform[3] += matX.at<float>(3, 0);
         transform[4] += matX.at<float>(4, 0);
         transform[5] += matX.at<float>(5, 0);
+
       //}
 
       float deltaR = sqrt(matX.at<float>(0, 0) * 180 / PI * matX.at<float>(0, 0) * 180 / PI
@@ -544,6 +606,11 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
     }
   }
 
+  // cout<<"vo at "<<std::fixed<< imagePoints2->header.stamp.toSec()<<" result: ";
+  // for(int m = 0; m<6; m++)
+  //   cout<<transform[m]<<" ";
+  // cout <<endl; 
+
   if (!imuInited) {
     imuYawInit = imuYawCur;
     transform[0] -= imuPitchCur;
@@ -555,6 +622,8 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
   double rx, ry, rz;
   accumulateRotation(transformSum[0], transformSum[1], transformSum[2], 
                     -transform[0], -transform[1], -transform[2], rx, ry, rz);
+  // cout <<"rx ry rz "<<rx<<" "<< ry<<" "<<rz<<endl; 
+  
 
   if (imuPointerLast >= 0) {
     double drx, dry, drz;
@@ -585,6 +654,8 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
   double tx = transformSum[3] - (cos(ry) * x2 + sin(ry) * z2);
   double ty = transformSum[4] - y2;
   double tz = transformSum[5] - (-sin(ry) * x2 + cos(ry) * z2);
+
+  // cout <<"tx ty tz "<<tx<<" "<< ty<<" "<<tz<<endl; 
 
   transformSum[0] = rx;
   transformSum[1] = ry;
@@ -645,6 +716,18 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
       ipDepthCur->push_back(-1);
     }
   }
+
+  // if(transformSum[3] == 0. && transformSum[4] == 0. && transformSum[5] == 0.)
+  // {
+  //   static ofstream ouf("ori_pt_demo.log");
+  //   for(int i=0; i<startPointsCur->points.size(); i++)
+  //   {
+  //       ImagePoint& pt = startPointsCur->points[i];
+  //       if(pt.ind <= 0)
+  //           ouf<<std::fixed<<imagePoints2->header.stamp<<" "<<pt.ind<<" "<<pt.u<<" "<<pt.v<<endl;
+  //   }
+  // }
+
   startPointsLast->clear();
   startTransLast->clear();
   ipDepthLast->clear();
@@ -670,6 +753,8 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
   voData.twist.twist.angular.y = angleSum[1];
   voData.twist.twist.angular.z = angleSum[2];
   voDataPubPointer->publish(voData);
+  cout <<"vo publish: vo t "<<tx<<" "<<ty <<" "<<tz<<endl;
+  cout <<"vo publish: vo q "<< -geoQuat.y<<" "<< -geoQuat.z<<" "<<geoQuat.x<<" "<<geoQuat.w<<endl;
 
   tf::StampedTransform voTrans;
   voTrans.frame_id_ = "/camera_init";
@@ -759,7 +844,7 @@ void depthCloudHandler(const sensor_msgs::PointCloud2ConstPtr& depthCloud2)
   depthCloud->clear();
   pcl::fromROSMsg(*depthCloud2, *depthCloud);
   depthCloudNum = depthCloud->points.size();
-
+  cout <<"vo receive "<<std::fixed<< depthCloudTime<<" dpt has: "<<depthCloudNum<<" points!"<<endl;
   if (depthCloudNum > 10) {
     for (int i = 0; i < depthCloudNum; i++) {
       depthCloud->points[i].intensity = depthCloud->points[i].z;
@@ -790,18 +875,23 @@ void imuDataHandler(const sensor_msgs::Imu::ConstPtr& imuData)
 void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData) 
 {
   cv_bridge::CvImagePtr bridge = cv_bridge::toCvCopy(imageData, "bgr8");
-
+  
+  // cout<<"vo_node display image at "<<std::fixed<<imageData->header.stamp.toSec()<<endl;
   int ipRelationsNum = ipRelations->points.size();
   for (int i = 0; i < ipRelationsNum; i++) {
     if (fabs(ipRelations->points[i].v) < 0.5) {
       cv::circle(bridge->image, cv::Point((kImage[2] - ipRelations->points[i].z * kImage[0]) / showDSRate,
                 (kImage[5] - ipRelations->points[i].h * kImage[4]) / showDSRate), 1, CV_RGB(255, 0, 0), 2);
+      // cout<<"No depth: pt.uj = "<<(kImage[2] - ipRelations->points[i].z * kImage[0])<<" pt.vj: "<<(kImage[5] - ipRelations->points[i].h * kImage[4])<<" pt.s = "<<ipRelations->points[i].s<<endl;
+
     } else if (fabs(ipRelations->points[i].v - 1) < 0.5) {
       cv::circle(bridge->image, cv::Point((kImage[2] - ipRelations->points[i].z * kImage[0]) / showDSRate,
                 (kImage[5] - ipRelations->points[i].h * kImage[4]) / showDSRate), 1, CV_RGB(0, 255, 0), 2);
+      // cout<<"Depth MES: pt.uj = "<<(kImage[2] - ipRelations->points[i].z * kImage[0])<<" pt.vj: "<<(kImage[5] - ipRelations->points[i].h * kImage[4])<<" pt.s = "<<ipRelations->points[i].s<<endl;
     } else if (fabs(ipRelations->points[i].v - 2) < 0.5) {
       cv::circle(bridge->image, cv::Point((kImage[2] - ipRelations->points[i].z * kImage[0]) / showDSRate,
                 (kImage[5] - ipRelations->points[i].h * kImage[4]) / showDSRate), 1, CV_RGB(0, 0, 255), 2);
+      // cout<<"Depth TRI: pt.uj = "<<(kImage[2] - ipRelations->points[i].z * kImage[0])<<" pt.vj: "<<(kImage[5] - ipRelations->points[i].h * kImage[4])<<" pt.s = "<<ipRelations->points[i].s<<endl;
     } /*else {
       cv::circle(bridge->image, cv::Point((kImage[2] - ipRelations->points[i].z * kImage[0]) / showDSRate,
                 (kImage[5] - ipRelations->points[i].h * kImage[4]) / showDSRate), 1, CV_RGB(0, 0, 0), 2);
